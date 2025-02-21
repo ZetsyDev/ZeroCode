@@ -1,0 +1,23 @@
+[project]
+name = "zerocode"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Manoj Bajaj", email = "manoj@zetsy.dev" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "chromadb>=0.6.3",
+    "litellm>=1.61.13",
+    "loguru>=0.7.3",
+    "rich>=13.9.4",
+    "typer>=0.15.1",
+]
+
+[project.scripts]
+zerocode = "zerocode:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
