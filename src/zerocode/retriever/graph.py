@@ -17,9 +17,10 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 
 from zerocode.agent.configuration import Configuration
-from zerocode.agent.state import State
 from zerocode.agent.utils import format_docs, get_message_text, load_chat_model
+from zerocode.retriever.prompts import QUERY_SYSTEM_PROMPT, RESPONSE_SYSTEM_PROMPT
 from zerocode.retriever.retriever import make_retriever
+from zerocode.retriever.state import InputState, State
 
 
 
@@ -32,7 +33,7 @@ class SearchQuery(BaseModel):
     query: str
 
 
-async def generate_query(
+def generate_query(
     state: State, *, config: RunnableConfig
 ) -> dict[str, list[str]]:
     """Generate a search query based on the current state and configuration.
@@ -63,7 +64,7 @@ async def generate_query(
         # Feel free to customize the prompt, model, and other logic!
         prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", configuration.query_system_prompt),
+                ("system", QUERY_SYSTEM_PROMPT),
                 ("placeholder", "{messages}"),
             ]
         )
@@ -71,7 +72,7 @@ async def generate_query(
             SearchQuery
         )
 
-        message_value = await prompt.ainvoke(
+        message_value = prompt.invoke(
             {
                 "messages": state.messages,
                 "queries": "\n- ".join(state.queries),
@@ -79,13 +80,13 @@ async def generate_query(
             },
             config,
         )
-        generated = cast(SearchQuery, await model.ainvoke(message_value, config))
+        generated = cast(SearchQuery, model.invoke(message_value, config))
         return {
             "queries": [generated.query],
         }
 
 
-async def retrieve(
+def retrieve(
     state: State, *, config: RunnableConfig
 ) -> dict[str, list[Document]]:
     """Retrieve documents based on the latest query in the state.
@@ -103,11 +104,11 @@ async def retrieve(
         containing a list of retrieved Document objects.
     """
     with make_retriever(config) as retriever:
-        response = await retriever.ainvoke(state.queries[-1], config)
+        response =  retriever.invoke(state.queries[-1], config)
         return {"retrieved_docs": response}
 
 
-async def respond(
+def respond(
     state: State, *, config: RunnableConfig
 ) -> dict[str, list[BaseMessage]]:
     """Call the LLM powering our "agent"."""
@@ -115,14 +116,14 @@ async def respond(
     # Feel free to customize the prompt, model, and other logic!
     prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", configuration.response_system_prompt),
+            ("system", RESPONSE_SYSTEM_PROMPT),
             ("placeholder", "{messages}"),
         ]
     )
     model = load_chat_model(configuration.response_model)
 
     retrieved_docs = format_docs(state.retrieved_docs)
-    message_value = await prompt.ainvoke(
+    message_value = prompt.invoke(
         {
             "messages": state.messages,
             "retrieved_docs": retrieved_docs,
@@ -130,7 +131,7 @@ async def respond(
         },
         config,
     )
-    response = await model.ainvoke(message_value, config)
+    response = model.invoke(message_value, config)
     # We return a list, because this will get added to the existing list
     return {"messages": [response]}
 
@@ -138,7 +139,7 @@ async def respond(
 # Define a new graph (It's just a pipe)
 
 
-builder = StateGraph(State, input=State, config_schema=Configuration)
+builder = StateGraph(State, input=InputState, config_schema=Configuration)
 
 builder.add_node(generate_query)
 builder.add_node(retrieve)

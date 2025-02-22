@@ -1,18 +1,19 @@
 # Cli for ZeroCode local development
 import typer
 
-from zerocode.agent.graph import stream_graph_updates
+from zerocode.agent.utils import stream_graph_updates
 
 app = typer.Typer()
 
 @app.command()
 def chat():
+    from zerocode.agent.graph import graph
     while True:
         user_input = input("User: ")
         if user_input.lower() in ["quit", "exit", "q"]:
             print("Goodbye!")
             break
-        stream_graph_updates(user_input)
+        stream_graph_updates(user_input, graph)
         
 @app.command()
 def index():
@@ -24,3 +25,13 @@ def index():
             print("Goodbye!")
             break
         graph.invoke({"docs": user_input})
+
+@app.command()
+def retrieve():
+    from zerocode.retriever.graph import graph
+    while True:
+        user_input = input("User: ")
+        if user_input.lower() in ["quit", "exit", "q"]:
+            print("Goodbye!")
+            break
+        stream_graph_updates(user_input, graph)

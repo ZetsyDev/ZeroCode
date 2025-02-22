@@ -30,7 +30,3 @@ graph_builder.add_edge("chatbot", END)
 graph = graph_builder.compile()
 graph.name = "chatbot"
 
-def stream_graph_updates(user_input: str):
-    for event in graph.stream({"messages": [{"role": "user", "content": user_input}]}):
-        for value in event.values():
-            print("Assistant:", value["messages"][-1].content)

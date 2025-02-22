@@ -100,3 +100,11 @@ def load_chat_model(fully_specified_name: str) -> BaseChatModel:
         provider = ""
         model = fully_specified_name
     return init_chat_model(model, model_provider=provider)
+
+def stream_graph_updates(user_input: str, graph):
+    for event in graph.stream({"messages": [{"role": "user", "content": user_input}]}):
+        for value in event.values():
+            if "messages" in value:
+                print("Assistant:", value["messages"][-1].content)
+            else:
+                print(value)
