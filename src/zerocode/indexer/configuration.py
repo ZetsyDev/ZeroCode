@@ -1,7 +1,5 @@
 """Define the configurable parameters for the agent."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, fields
 from typing import Optional
 
@@ -9,9 +7,8 @@ from langchain_core.runnables import RunnableConfig
 
 
 @dataclass(kw_only=True)
-class Configuration:
+class IndexConfiguration:
     """The configuration for the agent."""
-
     retriever_provider: str = "pinecone"
     embedding_model: str = "openai/text-embedding-3-small"
     response_model: str = "anthropic/claude-3-5-sonnet-20240620"
@@ -21,7 +18,7 @@ class Configuration:
     @classmethod
     def from_runnable_config(
         cls, config: Optional[RunnableConfig] = None
-    ) -> Configuration:
+    ):
         """Create a Configuration instance from a RunnableConfig object."""
         configurable = (config.get("configurable") or {}) if config else {}
         _fields = {f.name for f in fields(cls) if f.init}

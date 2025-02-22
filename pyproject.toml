@@ -6,10 +6,16 @@ readme = "README.md"
 authors = [
     { name = "Manoj Bajaj", email = "manoj@zetsy.dev" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "chromadb>=0.6.3",
     "langchain-anthropic>=0.3.7",
+    "langchain-chroma>=0.2.2",
+    "langchain-cohere>=0.4.2",
+    "langchain-elasticsearch>=0.3.2",
+    "langchain-mongodb>=0.4.0",
+    "langchain-openai>=0.3.6",
+    "langchain-pinecone>=0.2.3",
     "langgraph>=0.2.74",
     "langsmith>=0.3.10",
     "litellm>=1.61.13",
@@ -24,3 +30,8 @@ zerocode = "zerocode:app"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+lint = [
+    "ruff>=0.9.7",
+]
