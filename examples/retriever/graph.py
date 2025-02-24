@@ -18,9 +18,9 @@ from langgraph.graph import StateGraph, START, END
 
 from zerocode.agent.configuration import Configuration
 from zerocode.agent.utils import format_docs, get_message_text, load_chat_model
-from zerocode.retriever.prompts import QUERY_SYSTEM_PROMPT, RESPONSE_SYSTEM_PROMPT
-from zerocode.retriever.retriever import make_retriever
-from zerocode.retriever.state import InputState, State
+from .prompts import QUERY_SYSTEM_PROMPT, RESPONSE_SYSTEM_PROMPT
+from .retriever import make_retriever
+from .state import InputState, State
 
 
 

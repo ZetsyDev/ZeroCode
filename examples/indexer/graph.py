@@ -5,9 +5,9 @@ from typing import Optional
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 
-from zerocode.indexer.configuration import IndexConfiguration
-from zerocode.indexer.state import IndexState
-from zerocode.retriever.retriever import make_retriever
+from .configuration import IndexConfiguration
+from .state import IndexState
+from examples.retriever.retriever import make_retriever
 
 
 
