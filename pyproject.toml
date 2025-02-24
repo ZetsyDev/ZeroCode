@@ -22,6 +22,7 @@ dependencies = [
     "litellm>=1.61.13",
     "loguru>=0.7.3",
     "rich>=13.9.4",
+    "tavily-python>=0.5.1",
     "typer>=0.15.1",
 ]
 
