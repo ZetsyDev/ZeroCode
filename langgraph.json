@@ -1,8 +1,9 @@
 {
     "dependencies": ["."],
     "graphs": {
-      "indexer": "./src/zerocode/indexer/graph.py:graph",
-      "retrieval_graph": "./src/zerocode/retriever/graph.py:graph"
+      "react_agent": "./examples/react/graph.py:graph",
+      "indexer": "./examples/indexer/graph.py:graph",
+      "retriever": "./examples/retriever/graph.py:graph"
     },
     "env": ".env"
 }

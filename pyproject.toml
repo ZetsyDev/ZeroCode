@@ -13,6 +13,7 @@ dependencies = [
     "langchain-chroma>=0.2.2",
     "langchain-cohere>=0.4.2",
     "langchain-elasticsearch>=0.3.2",
+    "langchain-mcp-adapters>=0.0.2",
     "langchain-mongodb>=0.4.0",
     "langchain-openai>=0.3.6",
     "langchain-pinecone>=0.2.3",
