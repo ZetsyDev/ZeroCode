@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "chromadb>=0.6.3",
+    "datasets>=3.3.2",
     "langchain-anthropic>=0.3.7",
     "langchain-chroma>=0.2.2",
     "langchain-cohere>=0.4.2",
