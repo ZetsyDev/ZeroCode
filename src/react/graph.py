@@ -17,7 +17,7 @@ def get_weather(city: Literal["nyc", "sf"]):
 
 tools = [get_weather]
 
-llm = ChatAnthropic(model="claude-3-5-sonnet-20240620")
+llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
 graph = create_react_agent(llm, tools=tools)
 graph.name = "reAct agent"
 
