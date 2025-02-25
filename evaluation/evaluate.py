@@ -1,24 +1,18 @@
 import os
 import re
 import string
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 import json
 from langchain_anthropic import ChatAnthropic
 import pandas as pd
 from tqdm import tqdm
 from datasets import load_dataset
-from langchain_core.language_models import BaseLanguageModel
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import AIMessage, SystemMessage
-from langsmith.evaluation import RunEvaluator
-from langsmith.schemas import Example, Run
-from langchain_core.runnables import Runnable
-from langgraph.graph import END, StateGraph
+from langchain_core.messages import AIMessage
+from langgraph.graph import StateGraph
 from langgraph.prebuilt import create_react_agent
-from uuid import uuid4
 from pathlib import Path
 import typer
-from typing import Optional
 from loguru import logger
     
 app = typer.Typer()
@@ -26,29 +20,41 @@ app = typer.Typer()
 
 def create_agent(llm: str, tools: List[Dict]) -> StateGraph:
     """Create a LangGraph agent with the given LLM and tools."""
-    llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
-    agent = create_react_agent(llm, tools)
+    llm = ChatAnthropic(model="claude-3-7-sonnet-latest")
+    GAIA_NORMALIZATION_PROMPT = """
+Finish your answer with the following template:
+FINAL ANSWER: [YOUR FINAL ANSWER]. YOUR FINAL ANSWER should be a number OR as few words as possible OR a comma separated list of numbers and/or strings.
+If you are asked for a number, don't use comma to write your number neither use units such as $ or percent sign unless specified otherwise.
+    If you are asked for a string, don't use articles, neither abbreviations (e.g. for cities), and write the digits in plain text unless specified otherwise.
+    If you are asked for a comma separated list, apply the above rules depending of whether the element to be put in the list is a number or a string.
+    """
+    agent = create_react_agent(llm, tools, prompt=GAIA_NORMALIZATION_PROMPT)
     return agent
+
+def extract_normalized_answer(answer: str) -> str:
+    if "FINAL ANSWER: " in answer:
+        return answer[answer.rindex("FINAL ANSWER: ") + len("FINAL ANSWER: ") :].strip()
+    return answer
 
 def load_gaia_dataset(split="validation", max_samples=100, run_id=int):
     """Load the GAIA dataset from Hugging Face."""
     dataset = load_dataset("gaia-benchmark/GAIA",name="2023_level1", split=split, cache_dir=".cache", token=os.getenv("HUGGINGFACE_API_KEY"))
 
-    if max_samples and max_samples < len(dataset):
-        dataset = dataset.select(range(max_samples))
     try:
         results = load_results(run_id)
         ids = set([result["id"] for result in results])
-        dataset = dataset.filter(lambda x: x["task_id"] in ids)
+        dataset = dataset.filter(lambda x: x["task_id"] not in ids)
     except:
-        pass
-    return dataset
+        print("First run, no results to filter")
+    
+    if max_samples and max_samples < len(dataset):
+        dataset = dataset.select(range(max_samples))
 
+    return dataset
 
 def remove_boxed(text):
     # Replace \boxed{number} with just the number
     return re.sub(r"\\boxed\{(\d+)\}", r"\1", text)
-
 
 def normalize_number_str(number_str: str) -> float:
     number_str = remove_boxed(number_str)
@@ -61,7 +67,6 @@ def normalize_number_str(number_str: str) -> float:
     except ValueError:
         return float("inf")
 
-
 def split_string(
     s: str,
     char_list: list[str] = [",", ";"],
@@ -69,14 +74,12 @@ def split_string(
     pattern = f"[{''.join(char_list)}]"
     return re.split(pattern, s)
 
-
 def is_float(element: Any) -> bool:
     try:
         float(element)
         return True
     except ValueError:
         return False
-
 
 def normalize_str(input_str, remove_punct=True) -> str:
     """
@@ -114,7 +117,7 @@ def get_question_score_gaia(
         ma_elems = split_string(model_answer)
 
         if len(gt_elems) != len(ma_elems):  # check length is the same
-            logger.warn("Answer lists have different lengths, returning False.", UserWarning)
+            logger.debug("Answer lists have different lengths, returning False.", UserWarning)
             return False
 
         comparisons = []
@@ -148,12 +151,13 @@ def evaluate_agent_on_gaia(agent_graph, eval_dataset):
         try:
             # Run the agent
             final_state = agent_graph.invoke({"messages": {"role": "user", "content": question}})
-            
+            answer = final_state["messages"][-1].content if isinstance(final_state["messages"][-1], AIMessage) else "No response"
+            normalized_answer = extract_normalized_answer(answer)
             results.append({
                 "id": id,
                 "question": question,
                 "ground_truth": ground_truth,
-                "agent_answer": final_state["messages"][-1].content if isinstance(final_state["messages"][-1], AIMessage) else "No response",
+                "agent_answer": normalized_answer,
             })
         
         except Exception as e:
@@ -299,14 +303,20 @@ def report(
 ):
     """Analyze results from a previous evaluation run."""
     # Load results from the specified run
-
+    correct_count = 0
     report = load_results(run_id)
     for result in report:
         ground_truth = result["ground_truth"]
         agent_answer = result["agent_answer"]
-        score = get_question_score_gaia(agent_answer, ground_truth)
-        print(score)
-        
+        correct = get_question_score_gaia(agent_answer, ground_truth)
+        if correct:
+            correct_count += 1
+
+    # Calculate percentage of correct answers
+    total_count = len(report)
+    accuracy = (correct_count / total_count) * 100
+    print(f"\nAccuracy: {accuracy:.2f}%")
+
     # Print summary metrics
     # print("\nSummary Metrics:")
     # for key, value in report["summary_metrics"].items():

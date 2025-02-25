@@ -194,7 +194,7 @@ def perplexity_search(search_queries):
         
         # First citation gets the full content
         results.append({
-            "title": f"Perplexity Search, Source 1",
+            "title": "Perplexity Search, Source 1",
             "url": citations[0],
             "content": content,
             "raw_content": content,

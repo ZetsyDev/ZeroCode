@@ -4,7 +4,6 @@ from dataclasses import dataclass, fields
 from typing import Any, Optional
 
 from langchain_core.runnables import RunnableConfig
-from dataclasses import dataclass
 
 DEFAULT_REPORT_STRUCTURE = """Use this structure to create a report on the user-provided topic:
 
