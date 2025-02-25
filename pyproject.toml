@@ -10,10 +10,12 @@ requires-python = ">=3.11"
 dependencies = [
     "chromadb>=0.6.3",
     "datasets>=3.3.2",
+    "duckduckgo-search>=7.5.0",
     "langchain-anthropic>=0.3.7",
     "langchain-chroma>=0.2.2",
     "langchain-cohere>=0.4.2",
     "langchain-elasticsearch>=0.3.2",
+    "langchain-experimental>=0.3.4",
     "langchain-mcp-adapters>=0.0.2",
     "langchain-mongodb>=0.4.0",
     "langchain-openai>=0.3.6",
