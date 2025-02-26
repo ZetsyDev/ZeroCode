@@ -3,16 +3,14 @@ import re
 import string
 from typing import Dict, List, Any
 import json
-from langchain_anthropic import ChatAnthropic
-import pandas as pd
 from tqdm import tqdm
 from datasets import load_dataset
 from langchain_core.messages import AIMessage
-from langgraph.graph import StateGraph
-from langgraph.prebuilt import create_react_agent
+
 from pathlib import Path
 import typer
 from loguru import logger
+from simple.graph import graph as simple_graph
     
 app = typer.Typer()
 
@@ -131,7 +129,7 @@ class GAIAEvaluator:
         pass
     
     @staticmethod
-    def load_dataset(split="validation", max_samples=100, run_id=int):
+    def load_dataset(split="validation", max_samples=100, run_id=int, task_id: str = None):
         """Load the GAIA dataset from Hugging Face."""
         dataset = load_dataset("gaia-benchmark/GAIA",name="2023_level1", split=split, cache_dir=".cache", token=os.getenv("HUGGINGFACE_API_KEY"))
 
@@ -145,24 +143,12 @@ class GAIAEvaluator:
         
         if max_samples and max_samples < len(dataset):
             dataset = dataset.select(range(max_samples))
+
+        # Filter for a specific task if task_id is provided
+        if task_id:
+            dataset = dataset.filter(lambda x: x["id"] == task_id)
         return dataset
     
-    def create_agent() -> StateGraph:
-        """Create a LangGraph agent with the given LLM and tools."""
-        llm = ChatAnthropic(model="claude-3-7-sonnet-latest")
-        GAIA_NORMALIZATION_PROMPT = """
-    Finish your answer with the following template:
-    FINAL ANSWER: [YOUR FINAL ANSWER]. YOUR FINAL ANSWER should be a number OR as few words as possible OR a comma separated list of numbers and/or strings.
-    If you are asked for a number, don't use comma to write your number neither use units such as $ or percent sign unless specified otherwise.
-        If you are asked for a string, don't use articles, neither abbreviations (e.g. for cities), and write the digits in plain text unless specified otherwise.
-        If you are asked for a comma separated list, apply the above rules depending of whether the element to be put in the list is a number or a string.
-        """
-        
-        tools = [
-        ]
-        agent = create_react_agent(llm, tools, prompt=GAIA_NORMALIZATION_PROMPT)
-        return agent
-        
     def get_question_score(self, model_answer: str, ground_truth: str) -> bool:
         
         if is_float(ground_truth):
@@ -207,7 +193,8 @@ def evaluate_agent_on_gaia(eval_dataset):
     """Run evaluation of the agent on GAIA dataset."""
     results = []
     evaluator = GAIAEvaluator()
-    agent_graph = GAIAEvaluator.create_agent()
+    
+    agents = [simple_graph]
     # Run evaluations
     for idx, example in enumerate(tqdm(eval_dataset, desc="Evaluating")):
         id = example["id"]
@@ -218,22 +205,23 @@ def evaluate_agent_on_gaia(eval_dataset):
         
         try:
             # Run the agent
-            final_state = agent_graph.invoke({"messages": {"role": "user", "content": question}})
-            answer = final_state["messages"][-1].content if isinstance(final_state["messages"][-1], AIMessage) else "No response"
-            normalized_answer = extract_normalized_answer(answer)
-            correct = evaluator.get_question_score(normalized_answer, ground_truth)
-            results.append({
-                "id": id,
-                "question": question,
-                "ground_truth": ground_truth,
-                "agent_answer": answer,
-                "final_answer": normalized_answer,
-                "correct": correct
-            })
-            # if not correct:
-            #     logger.error(f"Incorrect answer for question {id}. \nQuestion: {question}\nGround truth: {ground_truth}\nAgent answer: {answer}\nFinal answer: {normalized_answer}")
-            #     break
-        
+            for agent in agents:
+                final_state = agent.invoke({"messages": {"role": "user", "content": question}})
+                answer = final_state["messages"][-1].content if isinstance(final_state["messages"][-1], AIMessage) else "No response"
+                normalized_answer = extract_normalized_answer(answer)
+                correct = evaluator.get_question_score(normalized_answer, ground_truth)
+                results.append({
+                    "id": id,
+                    "question": question,
+                    "ground_truth": ground_truth,
+                    "agent_answer": answer,
+                    "final_answer": normalized_answer,
+                    "is_correct": correct,
+                    "metrics": {
+                        "solved_by": agent.name,
+                    },
+
+                })
         except Exception as e:
             results.append({
                 "question": question,
@@ -244,30 +232,18 @@ def evaluate_agent_on_gaia(eval_dataset):
     
     return results
 
-def evaluate_agent(max_samples=50, run_id=int):
-    """Run the evaluation step."""
-    
-    
+@app.command()
+def evaluate(
+    max_samples: int = typer.Option(1, help="Maximum number of samples to evaluate"),
+    run_id: int = typer.Option(help="Run ID for tracking this evaluation")
+):
+    """Run evaluation of an agent on the GAIA benchmark."""
+
     print("Loading GAIA dataset")
     dataset = GAIAEvaluator.load_dataset(max_samples=max_samples, run_id=run_id)
     
     print(f"Starting evaluation on {len(dataset)} examples")
     results = evaluate_agent_on_gaia(dataset)
-    return results, run_id
-
-
-
-@app.command()
-def evaluate(
-    model_name: str = typer.Option("anthropic/claude-3-5-sonnet-20241022", help="Name of the model to evaluate"),
-    max_samples: int = typer.Option(1, help="Maximum number of samples to evaluate"),
-    run_id: int = typer.Option(help="Run ID for tracking this evaluation")
-):
-    """Run evaluation of an agent on the GAIA benchmark."""
-    results, run_id = evaluate_agent(
-        max_samples=max_samples, 
-        run_id=run_id
-    )
     save_results(results, run_id)  
     return results
 
@@ -293,6 +269,24 @@ def report(
     accuracy = (correct_count / total_count) * 100
     print(f"\nAccuracy: {accuracy:.2f}%")
 
+
+@app.command()
+def retry(
+    task_id: str = typer.Option(help="Task ID to retry")
+):
+    """Retry a specific task from a previous evaluation run."""
+    # Load the single example from the dataset
+    dataset = GAIAEvaluator.load_dataset(task_id=task_id)
+    
+    # Filter for just the requested task
+    if len(dataset) == 0:
+        print(f"No task found with ID {task_id}")
+        return
+    print(f"Evaluating {dataset[0]}")
+    results = evaluate_agent_on_gaia(dataset)
+    print(results)
+
+    return results
 
 
 
