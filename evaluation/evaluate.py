@@ -1,7 +1,8 @@
 import os
 import re
 import string
-from typing import Dict, List, Any
+import time
+from typing import Dict, Any
 import json
 from tqdm import tqdm
 from datasets import load_dataset
@@ -11,6 +12,7 @@ from pathlib import Path
 import typer
 from loguru import logger
 from simple.graph import graph as simple_graph
+from thinking.graph import graph as thinking_graph
     
 app = typer.Typer()
 
@@ -150,6 +152,7 @@ class GAIAEvaluator:
         return dataset
     
     def get_question_score(self, model_answer: str, ground_truth: str) -> bool:
+        """Get the score for a question."""
         
         if is_float(ground_truth):
             normalized_answer = normalize_number_str(str(model_answer))
@@ -188,13 +191,12 @@ def extract_normalized_answer(answer: str) -> str:
 
 
 
-# 6. Main evaluation function
 def evaluate_agent_on_gaia(eval_dataset):
     """Run evaluation of the agent on GAIA dataset."""
     results = []
     evaluator = GAIAEvaluator()
     
-    agents = [simple_graph]
+    agent = thinking_graph # simple_graph
     # Run evaluations
     for idx, example in enumerate(tqdm(eval_dataset, desc="Evaluating")):
         id = example["id"]
@@ -205,23 +207,29 @@ def evaluate_agent_on_gaia(eval_dataset):
         
         try:
             # Run the agent
-            for agent in agents:
-                final_state = agent.invoke({"messages": {"role": "user", "content": question}})
-                answer = final_state["messages"][-1].content if isinstance(final_state["messages"][-1], AIMessage) else "No response"
-                normalized_answer = extract_normalized_answer(answer)
-                correct = evaluator.get_question_score(normalized_answer, ground_truth)
-                results.append({
-                    "id": id,
-                    "question": question,
-                    "ground_truth": ground_truth,
-                    "agent_answer": answer,
-                    "final_answer": normalized_answer,
-                    "is_correct": correct,
-                    "metrics": {
-                        "solved_by": agent.name,
-                    },
+            metrics = {}
 
-                })
+            start_time = time.time()
+            final_state = agent.invoke({"messages": {"role": "user", "content": question}})
+            end_time = time.time()
+            time_taken = end_time - start_time
+            answer = final_state["messages"][-1].content if isinstance(final_state["messages"][-1], AIMessage) else "No response"
+            if isinstance(answer, list):
+                answer = answer[1]["text"]
+            normalized_answer = extract_normalized_answer(answer)
+            correct = evaluator.get_question_score(normalized_answer, ground_truth)
+            metrics[agent.name] = normalized_answer
+            metrics["time_taken"] = time_taken
+            metrics["solved_by"] = agent.name
+            results.append({
+                "id": id,
+                "question": question,
+                "ground_truth": ground_truth,
+                "agent_answer": answer,
+                "final_answer": normalized_answer,
+                "is_correct": correct,
+                "metrics": metrics,
+            })
         except Exception as e:
             results.append({
                 "question": question,
@@ -258,7 +266,7 @@ def report(
     incorrect_count = 0
     report = load_results(run_id)
     for result in report:
-        correct = result["correct"]
+        correct = result["is_correct"]
         if correct:
             correct_count += 1
         else:
