@@ -12,17 +12,13 @@ from langchain_core.messages import AIMessage
 from pathlib import Path
 import typer
 from loguru import logger
-# from simple.graph import graph as simple_graph
-# from thinking.graph import graph as thinking_graph
-# from deep_research.graph import graph as deep_research_graph
-# from react.graph import graph as react_graph
 from zerocode.graph import graph as zerocode_graph
 import asyncio
 
 app = typer.Typer()
 
 
-def save_results(results: Dict, run_id: str) -> None:
+def save_results(results: list[dict], run_id: str, append: bool = True) -> None:
     """Save evaluation results to a JSON file in the output directory.
     
     Args:
@@ -36,7 +32,7 @@ def save_results(results: Dict, run_id: str) -> None:
     
     # Load existing results if file exists
     existing_results = []
-    if output_file.exists():
+    if output_file.exists() and append:
         with open(output_file) as f:
             existing_results = json.load(f)
             
@@ -138,17 +134,17 @@ class GAIAEvaluator:
     @staticmethod
     def load_dataset(split="validation", max_samples=100, run_id=int, task_id: str = None):
         """Load the GAIA dataset from Hugging Face."""
-        dataset = load_dataset("gaia-benchmark/GAIA",name="2023_level1", split=split, cache_dir=".cache", token=os.getenv("HUGGINGFACE_API_KEY"))
+        dataset = load_dataset("gaia-benchmark/GAIA",name="2023_all", split=split, cache_dir=".cache", token=os.getenv("HUGGINGFACE_API_KEY"))
 
-        dataset = dataset.rename_columns({"Question": "question", "Final answer": "true_answer", "Level": "task", "task_id": "id"})
+        dataset = dataset.rename_columns({"Question": "question", "Final answer": "true_answer", "Level": "task"})
         # Filter for a specific task if task_id is provided
         if task_id:
-            dataset = dataset.filter(lambda x: x["id"] == task_id)
+            dataset = dataset.filter(lambda x: x["task_id"] == task_id)
         else:
             try:
                 results = load_results(run_id)
-                ids = set([result["id"] for result in results])
-                dataset = dataset.filter(lambda x: x["id"] not in ids)
+                ids = set([result["task_id"] for result in results])
+                dataset = dataset.filter(lambda x: x["task_id"] not in ids)
             except Exception as e:
                 print(f"Error loading results: {e}")
                 print("First run, no results to filter")
@@ -227,15 +223,15 @@ Predicted answer: {model_answer}
         return response.correct
 
 
-    def get_question_score(self, question: str, model_answer: str, ground_truth: str) -> bool:
+    def get_question_score(self, question: str, model_answer: str, ground_truth: str) -> tuple[bool, bool]:
         """Get the score for a question."""
         exact_match = self.get_exact_match_score(model_answer, ground_truth)
         if exact_match:
-            return True
+            return True, True
         else:
             print(f"Exact match failed for question")
             llm_judge_score = self.get_llm_judge_score(question, model_answer, ground_truth)
-            return llm_judge_score
+            return False, llm_judge_score
 
 
 
@@ -252,10 +248,10 @@ async def evaluate_agent_on_gaia(eval_dataset):
     
     agent = zerocode_graph
     # Run evaluations
-    for idx, example in enumerate(tqdm(eval_dataset, desc="Evaluating")):
-        id = example["id"]
-        question = example["question"]
-        ground_truth = example.get("true_answer", "")
+    for idx, task in enumerate(tqdm(eval_dataset, desc="Evaluating")):
+        task_id = task["task_id"]
+        question = task["question"]
+        ground_truth = task.get("true_answer", "")
         if ground_truth == "?":
             ground_truth = ""  
         
@@ -264,15 +260,17 @@ async def evaluate_agent_on_gaia(eval_dataset):
             metrics = {}
 
             start_time = time.time()
-            
-            if "file_content" in example:
-                file_content = example["file_content"]
+            file_content = task.get("file_content", None)
+            file_path = task.get("file_path", None)
+            file_name = task.get("file_name", None)
+            if file_content:
+                file_content = task["file_content"]
                 question = f"The question is: {question} \n The file content is: {file_content}"
-            elif "file_path" in example:
-                file_path = example["file_path"]
+            elif file_path:
+                file_path = task["file_path"]
                 question = f"The question is: {question} \n The file path is: {file_path}"
-            elif "file_name" in example:
-                file_name = example["file_name"]
+            elif file_name:
+                file_name = task["file_name"]
                 question = f"The question is: {question} \n The file name is: {file_name}"
             final_state = await agent.ainvoke({"messages": {"role": "user", "content": question}})
             end_time = time.time()
@@ -285,21 +283,15 @@ async def evaluate_agent_on_gaia(eval_dataset):
             metrics["time_taken"] = time_taken
             metrics["solved_by"] = agent.name
             results.append({
-                "id": id,
+                "task_id": task_id,
                 "question": question,
                 "ground_truth": ground_truth,
-                "agent_answer": answer,
-                "final_answer": normalized_answer,
+                "reasoning_trace": answer,
+                "model_answer": normalized_answer,
                 "metrics": metrics,
             })
         except Exception as e:
-            results.append({
-                "question": question,
-                "ground_truth": ground_truth,
-                "agent_answer": "Error occurred",
-                "metrics": {"error": str(e)}
-            })
-    
+            print(f"Error occurred for task {task_id}")
     return results
 
 @app.command()
@@ -324,24 +316,36 @@ def report(
 ):
     """Analyze results from a previous evaluation run."""
     # Load results from the specified run
-    correct_count = 0
+    exact_correct_count = 0
+    llm_judge_correct_count = 0
     incorrect_count = 0
     report = load_results(run_id)
     evaluator = GAIAEvaluator()
     for result in report:
-        question = result["question"]
-        normalized_answer = result["final_answer"]
-        ground_truth = result["ground_truth"]
-        correct = evaluator.get_question_score(question, normalized_answer, ground_truth)
-        if correct:
-            correct_count += 1
+        task_id = result.get("task_id", "")
+        if not task_id:
+            continue
+        if "exact_score" in result and "llm_score" in result:
+            exact_score = result["exact_score"]
+            llm_score = result["llm_score"]
+        else:
+            question = result["question"]
+            normalized_answer = result.get("model_answer", "")
+            ground_truth = result["ground_truth"]
+            exact_score, llm_score = evaluator.get_question_score(question, normalized_answer, ground_truth)
+            result["exact_score"] = exact_score
+            result["llm_score"] = llm_score
+        if exact_score:
+            exact_correct_count += 1
+        elif llm_score:
+            llm_judge_correct_count += 1
         else:
             incorrect_count += 1
-
+    save_results(report, run_id, append=False)
     # Calculate percentage of correct answers
-    total_count = correct_count + incorrect_count
-    accuracy = (correct_count / total_count) * 100
-    print(f"\nAccuracy: {accuracy:.2f}% , correct: {correct_count}, incorrect: {incorrect_count} , total: {total_count}")
+    total_count = exact_correct_count + llm_judge_correct_count + incorrect_count
+    accuracy = (exact_correct_count + llm_judge_correct_count) / total_count * 100
+    print(f"\nAccuracy: {accuracy:.2f}% , exact correct: {exact_correct_count}, llm judge correct: {llm_judge_correct_count}, incorrect: {incorrect_count} , total: {total_count}")
 
 
 @app.command()
@@ -361,10 +365,10 @@ def eval_single(
     results = asyncio.run(evaluate_agent_on_gaia(dataset))
     result = results[0]
     question = result["question"]
-    normalized_answer = result["final_answer"]
+    normalized_answer = result["model_answer"]
     ground_truth = result["ground_truth"]
-    correct = evaluator.get_question_score(question, normalized_answer, ground_truth)
-    print(f"Correct: {correct}")
+    exact_score, llm_judge_score = evaluator.get_question_score(question, normalized_answer, ground_truth)
+    print(f"Exact score: {exact_score}, LLM judge score: {llm_judge_score}")
     print(result)
     return results
 

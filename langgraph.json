@@ -1,11 +1,7 @@
 {
     "dependencies": ["."],
     "graphs": {
-      "deep_research": "./src/deep_research/graph.py:graph",
-      "react_agent": "./src/zerocode/agent/graph.py:graph",
-      "indexer": "./src/zerocode/indexer/graph.py:graph",
-      "retriever": "./src/zerocode/retriever/graph.py:graph",
-      "mcp": "./src/zerocode/mcp/graph.py:graph"
+      "zerocode": "./src/zerocode/graph.py:graph"
     },
     "env": ".env"
 }

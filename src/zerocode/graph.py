@@ -1,6 +1,5 @@
-from typing import Literal
+from functools import lru_cache
 from langchain_anthropic import ChatAnthropic
-
 from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
 
@@ -8,13 +7,19 @@ from markitdown import MarkItDown
 from openai import OpenAI
 
 from zerocode.utils import GAIA_NORMALIZATION_PROMPT
-from browser_use import Agent
+from browser_use import Agent, Browser
 from e2b_code_interpreter import Sandbox
 from langchain.chat_models import init_chat_model
 import os
+
+
 client = OpenAI()
 
 md = MarkItDown(llm_client=client, llm_model="gpt-4o")
+
+@lru_cache(maxsize=1)
+def get_browser():
+    return Browser()
 
 @tool
 def read_as_markdown(file_path: str) -> str:
@@ -30,7 +35,8 @@ def read_as_markdown(file_path: str) -> str:
     - HTML files
     - Text formats like CSV, JSON, XML
     - ZIP archives (processes contained files)
-    And more file types
+
+    Forr other file types, you can use the execute_code tool to execute code to convert the file to markdown.
 
     Args:
         file_path: Path to the input document file
@@ -38,8 +44,11 @@ def read_as_markdown(file_path: str) -> str:
     Returns:
         str: The document contents converted to markdown text
     """
-    result = md.convert(file_path)
-    return result.text_content
+    try:
+        result = md.convert(file_path)
+        return result.text_content
+    except:
+        return f"Error converting file to markdown"
 
 @tool
 async def search_web(query: str):
@@ -63,12 +72,14 @@ async def search_web(query: str):
         result = await search_web("latest news about AI")
         context = result["context"]  # Contains summarized web search findings
     """
-    llm_search = ChatAnthropic(model="claude-3-7-sonnet-latest")
+    llm_search = ChatAnthropic(model="claude-3-5-sonnet-latest")
     agent = Agent(
         task=query,
         llm=llm_search,
+        use_vision=True,
+        browser=get_browser(),
     )
-    history = await agent.run()
+    history = await agent.run(max_steps=20)
     result = history.final_result()
     return {"context": result}
 
@@ -106,24 +117,24 @@ def execute_code(code : str) -> str:
     """
     print(f"***Code Interpreting...\n{code}\n====")
 
-    code_interpreter = Sandbox(api_key=os.getenv("E2B_API_KEY"), timeout=60)
-    execution = code_interpreter.run_code(code)
-    code_interpreter.kill()
+    with Sandbox(api_key=os.getenv("E2B_API_KEY"), timeout=60) as code_interpreter:
+        execution = code_interpreter.run_code(code)
     return f"stdout: {execution.logs.stdout}\nstderr: {execution.logs.stderr}\nerror: {execution.error} \nresults: {execution.results}"
 
-tools = [read_as_markdown, search_web, execute_code]
+tools = [read_as_markdown, execute_code]
 
 
-llm = init_chat_model(model="claude-3-7-sonnet-latest", max_tokens=6000, thinking={"type": "enabled", "budget_tokens": 4000} )
+llm = init_chat_model(model="claude-3-7-sonnet-latest")
 
 prompt = f""" 
 You are given 3 tools to answer the question.
 1. read_as_markdown: to read a document file and return the contents as markdown text. Use this tool if the question is about a document to be read from file system.
-2. search_web: to search the web for the given query. Use this tool if you want to lookup web for some information.
-3. execute_code: to execute python code. Use this tool for complex calcualations or data analysis.
+2. execute_code: to execute python code. Use this tool for complex calcualations or data analysis.
 
 {GAIA_NORMALIZATION_PROMPT}
 """
 graph = create_react_agent(llm, tools=tools, prompt=prompt)
 graph.name = "reAct agent"
 
+
+# 3. search_web: to search the web for the given query. Use this tool if you want to lookup web for some information.
