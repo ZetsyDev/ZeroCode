@@ -17,7 +17,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 
 from retriever.configuration import Configuration
-from utils import format_docs, get_message_text, load_chat_model
+from zerocode.utils import format_docs, get_message_text, load_chat_model
 from .prompts import QUERY_SYSTEM_PROMPT, RESPONSE_SYSTEM_PROMPT
 from .retriever import make_retriever
 from .state import InputState, State

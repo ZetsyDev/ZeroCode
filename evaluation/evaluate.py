@@ -4,6 +4,7 @@ import string
 import time
 from typing import Dict, Any
 import json
+from langchain_anthropic import ChatAnthropic
 from tqdm import tqdm
 from datasets import load_dataset
 from langchain_core.messages import AIMessage
@@ -11,9 +12,13 @@ from langchain_core.messages import AIMessage
 from pathlib import Path
 import typer
 from loguru import logger
-from simple.graph import graph as simple_graph
-from thinking.graph import graph as thinking_graph
-    
+# from simple.graph import graph as simple_graph
+# from thinking.graph import graph as thinking_graph
+# from deep_research.graph import graph as deep_research_graph
+# from react.graph import graph as react_graph
+from zerocode.graph import graph as zerocode_graph
+import asyncio
+
 app = typer.Typer()
 
 
@@ -47,7 +52,7 @@ def save_results(results: Dict, run_id: str) -> None:
         
     print(f"Results saved to {output_file}")
 
-def load_results(run_id: int) -> Dict:
+def load_results(run_id: int):
     """Load evaluation results from a JSON file.
     
     Args:
@@ -136,22 +141,22 @@ class GAIAEvaluator:
         dataset = load_dataset("gaia-benchmark/GAIA",name="2023_level1", split=split, cache_dir=".cache", token=os.getenv("HUGGINGFACE_API_KEY"))
 
         dataset = dataset.rename_columns({"Question": "question", "Final answer": "true_answer", "Level": "task", "task_id": "id"})
-        try:
-            results = load_results(run_id)
-            ids = set([result["id"] for result in results])
-            dataset = dataset.filter(lambda x: x["id"] not in ids)
-        except:
-            print("First run, no results to filter")
-        
-        if max_samples and max_samples < len(dataset):
-            dataset = dataset.select(range(max_samples))
-
         # Filter for a specific task if task_id is provided
         if task_id:
             dataset = dataset.filter(lambda x: x["id"] == task_id)
+        else:
+            try:
+                results = load_results(run_id)
+                ids = set([result["id"] for result in results])
+                dataset = dataset.filter(lambda x: x["id"] not in ids)
+            except Exception as e:
+                print(f"Error loading results: {e}")
+                print("First run, no results to filter")
+            if max_samples and max_samples < len(dataset):
+                dataset = dataset.select(range(max_samples))
         return dataset
     
-    def get_question_score(self, model_answer: str, ground_truth: str) -> bool:
+    def get_exact_match_score(self, model_answer: str, ground_truth: str) -> bool:
         """Get the score for a question."""
         
         if is_float(ground_truth):
@@ -182,6 +187,56 @@ class GAIAEvaluator:
         else:  # if gt is a str
             return normalize_str(model_answer) == normalize_str(ground_truth)
 
+    def get_llm_judge_score(self, question: str, model_answer: str, ground_truth: str) -> bool:
+        """Get the score for a question."""
+        from pydantic import BaseModel
+        class JudgeResponse(BaseModel):
+            correct: bool
+
+        JUDGE_SYSTEM_PROMPT = """Evaluate the given predicted answer to the question by assigning a grade according to the provided grading guidelines.
+
+Grade the predicted answer as "Correct" or "Incorrect" based on these criteria:
+
+- **Correct**: The predicted answer fully contains the ground-truth answer without contradicting the reference answer. Numbers in the predicted answer must match numbers in the true answer exactly (including decimal places). Units can be omitted in the predicted answer.
+- **Incorrect**: The predicted answer contradicts the ground-truth answer in any way, even if the contradiction is hedged.
+
+Important: Numbers in the predicted answer must match numbers in the true answer exactly (including decimal places). Units can be omitted in the predicted answer.
+
+# Examples
+
+Question: Which Dutch player scored an open-play goal in the 2022 Netherlands vs Argentina game in the men's FIFA World Cup
+True answer: Wout Weghorst
+
+**Correct answers:**
+* Wout Weghorst
+* Wout Weghorst scored at 83' and 90+11' in that game
+
+**Incorrect answers:**
+* Virgil van Dijk
+* Virgil van Dijk and Wout Weghorst
+* Wout Weghorst and I think van Dijk scored, but I am not totally sure
+
+Question: {question}
+True answer: {ground_truth}
+Predicted answer: {model_answer}
+
+"""
+        llm_judge = ChatAnthropic(model="claude-3-7-sonnet-latest").with_structured_output(JudgeResponse)
+        response = llm_judge.invoke(JUDGE_SYSTEM_PROMPT)
+        print(f"LLM judge score: {response.correct}")
+        return response.correct
+
+
+    def get_question_score(self, question: str, model_answer: str, ground_truth: str) -> bool:
+        """Get the score for a question."""
+        exact_match = self.get_exact_match_score(model_answer, ground_truth)
+        if exact_match:
+            return True
+        else:
+            print(f"Exact match failed for question")
+            llm_judge_score = self.get_llm_judge_score(question, model_answer, ground_truth)
+            return llm_judge_score
+
 
 
 def extract_normalized_answer(answer: str) -> str:
@@ -191,12 +246,11 @@ def extract_normalized_answer(answer: str) -> str:
 
 
 
-def evaluate_agent_on_gaia(eval_dataset):
+async def evaluate_agent_on_gaia(eval_dataset):
     """Run evaluation of the agent on GAIA dataset."""
     results = []
-    evaluator = GAIAEvaluator()
     
-    agent = thinking_graph # simple_graph
+    agent = zerocode_graph
     # Run evaluations
     for idx, example in enumerate(tqdm(eval_dataset, desc="Evaluating")):
         id = example["id"]
@@ -210,14 +264,23 @@ def evaluate_agent_on_gaia(eval_dataset):
             metrics = {}
 
             start_time = time.time()
-            final_state = agent.invoke({"messages": {"role": "user", "content": question}})
+            
+            if "file_content" in example:
+                file_content = example["file_content"]
+                question = f"The question is: {question} \n The file content is: {file_content}"
+            elif "file_path" in example:
+                file_path = example["file_path"]
+                question = f"The question is: {question} \n The file path is: {file_path}"
+            elif "file_name" in example:
+                file_name = example["file_name"]
+                question = f"The question is: {question} \n The file name is: {file_name}"
+            final_state = await agent.ainvoke({"messages": {"role": "user", "content": question}})
             end_time = time.time()
             time_taken = end_time - start_time
             answer = final_state["messages"][-1].content if isinstance(final_state["messages"][-1], AIMessage) else "No response"
             if isinstance(answer, list):
                 answer = answer[1]["text"]
             normalized_answer = extract_normalized_answer(answer)
-            correct = evaluator.get_question_score(normalized_answer, ground_truth)
             metrics[agent.name] = normalized_answer
             metrics["time_taken"] = time_taken
             metrics["solved_by"] = agent.name
@@ -227,7 +290,6 @@ def evaluate_agent_on_gaia(eval_dataset):
                 "ground_truth": ground_truth,
                 "agent_answer": answer,
                 "final_answer": normalized_answer,
-                "is_correct": correct,
                 "metrics": metrics,
             })
         except Exception as e:
@@ -251,7 +313,7 @@ def evaluate(
     dataset = GAIAEvaluator.load_dataset(max_samples=max_samples, run_id=run_id)
     
     print(f"Starting evaluation on {len(dataset)} examples")
-    results = evaluate_agent_on_gaia(dataset)
+    results = asyncio.run(evaluate_agent_on_gaia(dataset))
     save_results(results, run_id)  
     return results
 
@@ -265,8 +327,12 @@ def report(
     correct_count = 0
     incorrect_count = 0
     report = load_results(run_id)
+    evaluator = GAIAEvaluator()
     for result in report:
-        correct = result["is_correct"]
+        question = result["question"]
+        normalized_answer = result["final_answer"]
+        ground_truth = result["ground_truth"]
+        correct = evaluator.get_question_score(question, normalized_answer, ground_truth)
         if correct:
             correct_count += 1
         else:
@@ -275,15 +341,16 @@ def report(
     # Calculate percentage of correct answers
     total_count = correct_count + incorrect_count
     accuracy = (correct_count / total_count) * 100
-    print(f"\nAccuracy: {accuracy:.2f}%")
+    print(f"\nAccuracy: {accuracy:.2f}% , correct: {correct_count}, incorrect: {incorrect_count} , total: {total_count}")
 
 
 @app.command()
-def retry(
+def eval_single(
     task_id: str = typer.Option(help="Task ID to retry")
 ):
-    """Retry a specific task from a previous evaluation run."""
+    """Try a specific task from a previous evaluation run."""
     # Load the single example from the dataset
+    evaluator = GAIAEvaluator()
     dataset = GAIAEvaluator.load_dataset(task_id=task_id)
     
     # Filter for just the requested task
@@ -291,9 +358,14 @@ def retry(
         print(f"No task found with ID {task_id}")
         return
     print(f"Evaluating {dataset[0]}")
-    results = evaluate_agent_on_gaia(dataset)
-    print(results)
-
+    results = asyncio.run(evaluate_agent_on_gaia(dataset))
+    result = results[0]
+    question = result["question"]
+    normalized_answer = result["final_answer"]
+    ground_truth = result["ground_truth"]
+    correct = evaluator.get_question_score(question, normalized_answer, ground_truth)
+    print(f"Correct: {correct}")
+    print(result)
     return results
 
 

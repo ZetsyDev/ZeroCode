@@ -6,7 +6,7 @@ from langchain_anthropic import ChatAnthropic
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 
-from utils import GAIA_NORMALIZATION_PROMPT
+from zerocode.utils import GAIA_NORMALIZATION_PROMPT
 
 llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
 

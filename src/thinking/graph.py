@@ -6,9 +6,9 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langchain.chat_models import init_chat_model
 
-from utils import GAIA_NORMALIZATION_PROMPT
+from zerocode.utils import GAIA_NORMALIZATION_PROMPT
 
-llm = init_chat_model(model="claude-3-7-sonnet-latest", max_tokens=10000, thinking={"type": "enabled", "budget_tokens": 8000} )
+llm = init_chat_model(model="claude-3-7-sonnet-latest", max_tokens=6000, thinking={"type": "enabled", "budget_tokens": 4000} )
 
 
 class State(TypedDict):
