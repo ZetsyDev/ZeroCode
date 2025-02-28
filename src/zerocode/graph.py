@@ -11,6 +11,7 @@ from browser_use import Agent, Browser
 from e2b_code_interpreter import Sandbox
 from langchain.chat_models import init_chat_model
 import os
+from ipybox import ExecutionClient, ExecutionContainer
 
 
 client = OpenAI()
@@ -20,6 +21,19 @@ md = MarkItDown(llm_client=client, llm_model="gpt-4o")
 @lru_cache(maxsize=1)
 def get_browser():
     return Browser()
+
+conatiner = None
+
+async def get_code_container():
+    global conatiner
+    if conatiner is None:
+        binds = {  
+            "./data": "data",  
+        }
+        container = ExecutionContainer(binds=binds,tag="ghcr.io/gradion-ai/ipybox:eval")
+        await container.run()
+    return container
+
 
 @tool
 def read_as_markdown(file_path: str) -> str:
@@ -121,20 +135,46 @@ def execute_code(code : str) -> str:
         execution = code_interpreter.run_code(code)
     return f"stdout: {execution.logs.stdout}\nstderr: {execution.logs.stderr}\nerror: {execution.error} \nresults: {execution.results}"
 
-tools = [read_as_markdown, execute_code]
+# @tool
+# async def execute_code(code : str) -> str:
+#     """Execute python code in a Jupyter notebook cell and returns any rich data (eg charts), stdout, stderr, and error.
 
+#     This function provides a sandboxed environment to safely execute arbitrary code
+#     and capture its output. It runs the provided code in an isolated context and
+#     collects outputs and any errors that occur.
+
+#     Mention dependencies in the code like this before running the code:
+#     !pip install matplotlib pandas numpy
+
+#     Args:
+#         code (str): The code block to execute, as a string
+
+#     Returns:
+#         str: Result string
+#     """
+    
+#     print(f"***Code Interpreting...\n{code}\n====")
+#     container = await get_code_container()
+    
+#     async with ExecutionClient(port=container.port) as client:
+#         result = await client.execute(code)  
+
+#     return result.text
+
+tools = [read_as_markdown, execute_code]
 
 llm = init_chat_model(model="claude-3-7-sonnet-latest")
 
 prompt = f""" 
-You are given 3 tools to answer the question.
+You are given following tools to answer the question.
 1. read_as_markdown: to read a document file and return the contents as markdown text. Use this tool if the question is about a document to be read from file system.
-2. execute_code: to execute python code. Use this tool for complex calcualations or data analysis.
+
+If you need extra information, do early exit with "FINAL ANSWER: MORE INFO NEEDED".
 
 {GAIA_NORMALIZATION_PROMPT}
 """
 graph = create_react_agent(llm, tools=tools, prompt=prompt)
 graph.name = "reAct agent"
 
-
+# 2. execute_code: to execute python code. Use this tool for complex calcualations or data analysis.
 # 3. search_web: to search the web for the given query. Use this tool if you want to lookup web for some information.
