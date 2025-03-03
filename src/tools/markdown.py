@@ -1,19 +1,13 @@
-from typing import Literal
-from langchain_anthropic import ChatAnthropic
-
-from langgraph.prebuilt import create_react_agent
-from langchain_core.tools import tool
-
-from markitdown import MarkItDown
 from openai import OpenAI
-
-from zerocode.utils import GAIA_NORMALIZATION_PROMPT
+from markitdown import MarkItDown
+from langchain.tools import tool
 
 client = OpenAI()
 
 md = MarkItDown(llm_client=client, llm_model="gpt-4o")
 
 
+@tool
 def read_as_markdown(file_path: str) -> str:
     """Read a document file and return the contents as markdown text.
 
@@ -27,7 +21,6 @@ def read_as_markdown(file_path: str) -> str:
     - HTML files
     - Text formats like CSV, JSON, XML
     - ZIP archives (processes contained files)
-    And more file types
 
     Args:
         file_path: Path to the input document file
@@ -35,12 +28,10 @@ def read_as_markdown(file_path: str) -> str:
     Returns:
         str: The document contents converted to markdown text
     """
-    result = md.convert(file_path)
-    return result.text_content
-
-tools = [read_as_markdown]
-
-llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
-graph = create_react_agent(llm, tools=tools, prompt=GAIA_NORMALIZATION_PROMPT)
-graph.name = "reAct agent"
-
+    try:
+        result = md.convert(file_path)
+        if len(result.text_content) > 10000:
+            return "File is too large to convert to markdown. Please use the execute_code tool to read the file."
+        return result.text_content
+    except:
+        return "Error converting file to markdown"

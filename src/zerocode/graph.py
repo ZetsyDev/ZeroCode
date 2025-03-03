@@ -1,180 +1,25 @@
-from functools import lru_cache
-from langchain_anthropic import ChatAnthropic
+from tools.sandbox import execute_code
+from zerocode.utils import load_chat_model
+
+from tools.markdown import read_as_markdown
+from tools.browser import search_web
+from zerocode.configuration import Configuration
 from langgraph.prebuilt import create_react_agent
-from langchain_core.tools import tool
 
-from markitdown import MarkItDown
-from openai import OpenAI
+def load_tools(config: Configuration):
+    tools = [read_as_markdown, execute_code, search_web]
+    return tools
 
-from zerocode.utils import GAIA_NORMALIZATION_PROMPT
-from browser_use import Agent, Browser
-from e2b_code_interpreter import Sandbox
-from langchain.chat_models import init_chat_model
-import os
-from ipybox import ExecutionClient, ExecutionContainer
+def create_graph(config: Configuration):
+    """Create and configure the agent workflow graph."""
+    tools = load_tools(config)
 
-
-client = OpenAI()
-
-md = MarkItDown(llm_client=client, llm_model="gpt-4o")
-
-@lru_cache(maxsize=1)
-def get_browser():
-    return Browser()
-
-conatiner = None
-
-async def get_code_container():
-    global conatiner
-    if conatiner is None:
-        binds = {  
-            "./data": "data",  
-        }
-        container = ExecutionContainer(binds=binds,tag="ghcr.io/gradion-ai/ipybox:eval")
-        await container.run()
-    return container
-
-
-@tool
-def read_as_markdown(file_path: str) -> str:
-    """Read a document file and return the contents as markdown text.
-
-    Uses MarkItDown to convert various document formats to markdown text, including:
-    - PDF documents
-    - PowerPoint presentations (.pptx)
-    - Word documents (.docx)
-    - Excel spreadsheets (.xlsx)
-    - Images (.jpg, .png, etc.) - extracts EXIF metadata and performs OCR
-    - Audio files - extracts EXIF metadata and transcribes speech
-    - HTML files
-    - Text formats like CSV, JSON, XML
-    - ZIP archives (processes contained files)
-
-    Forr other file types, you can use the execute_code tool to execute code to convert the file to markdown.
-
-    Args:
-        file_path: Path to the input document file
-
-    Returns:
-        str: The document contents converted to markdown text
-    """
-    try:
-        result = md.convert(file_path)
-        return result.text_content
-    except:
-        return f"Error converting file to markdown"
-
-@tool
-async def search_web(query: str):
-    """Search the web for the given query.
+    # Initialize LLM with configured model
+    llm = load_chat_model(config.model)
+    prompt = config.prompt
+    graph = create_react_agent(name="React Agent", model=llm, tools=tools, prompt=prompt)
     
-    Uses a browser agent to perform web searches and extract relevant information.
-    The agent will:
-    - Execute web searches based on the query
-    - Visit relevant pages
-    - Extract and summarize key information
-    - Handle pagination and multiple results as needed
-    
-    Args:
-        query (str): The search query to execute
-        
-    Returns:
-        dict: Contains "context" key with the aggregated search results and 
-        extracted information from relevant web pages
-        
-    Example:
-        result = await search_web("latest news about AI")
-        context = result["context"]  # Contains summarized web search findings
-    """
-    llm_search = ChatAnthropic(model="claude-3-5-sonnet-latest")
-    agent = Agent(
-        task=query,
-        llm=llm_search,
-        use_vision=True,
-        browser=get_browser(),
-    )
-    history = await agent.run(max_steps=20)
-    result = history.final_result()
-    return {"context": result}
+    return graph
 
-@tool
-def execute_code(code : str) -> str:
-    """Execute python code in a Jupyter notebook cell and returns any rich data (eg charts), stdout, stderr, and error.
 
-    This function provides a sandboxed environment to safely execute arbitrary code
-    and capture its output. It runs the provided code in an isolated context and
-    collects stdout, stderr, execution results and any errors that occur.
-
-    The code is executed using a Sandbox interpreter that provides:
-    - Isolated execution environment
-    - Captured stdout/stderr streams
-    - Error handling and reporting
-    - Access to execution results
-    
-    Args:
-        code (str): The code block to execute, as a string
-
-    Returns:
-        str: A formatted string containing:
-            - stdout: Standard output from code execution
-            - stderr: Standard error output
-            - error: Any error messages or exceptions
-            - results: The execution results/return values
-
-    Example:
-        result = execute_code("print('hello')\nx = 1 + 2\nprint(x)")
-        # Returns:
-        # stdout: hello\n3
-        # stderr: 
-        # error: None
-        # results: None
-    """
-    print(f"***Code Interpreting...\n{code}\n====")
-
-    with Sandbox(api_key=os.getenv("E2B_API_KEY"), timeout=60) as code_interpreter:
-        execution = code_interpreter.run_code(code)
-    return f"stdout: {execution.logs.stdout}\nstderr: {execution.logs.stderr}\nerror: {execution.error} \nresults: {execution.results}"
-
-# @tool
-# async def execute_code(code : str) -> str:
-#     """Execute python code in a Jupyter notebook cell and returns any rich data (eg charts), stdout, stderr, and error.
-
-#     This function provides a sandboxed environment to safely execute arbitrary code
-#     and capture its output. It runs the provided code in an isolated context and
-#     collects outputs and any errors that occur.
-
-#     Mention dependencies in the code like this before running the code:
-#     !pip install matplotlib pandas numpy
-
-#     Args:
-#         code (str): The code block to execute, as a string
-
-#     Returns:
-#         str: Result string
-#     """
-    
-#     print(f"***Code Interpreting...\n{code}\n====")
-#     container = await get_code_container()
-    
-#     async with ExecutionClient(port=container.port) as client:
-#         result = await client.execute(code)  
-
-#     return result.text
-
-tools = [read_as_markdown, execute_code]
-
-llm = init_chat_model(model="claude-3-7-sonnet-latest")
-
-prompt = f""" 
-You are given following tools to answer the question.
-1. read_as_markdown: to read a document file and return the contents as markdown text. Use this tool if the question is about a document to be read from file system.
-
-If you need extra information, do early exit with "FINAL ANSWER: MORE INFO NEEDED".
-
-{GAIA_NORMALIZATION_PROMPT}
-"""
-graph = create_react_agent(llm, tools=tools, prompt=prompt)
-graph.name = "reAct agent"
-
-# 2. execute_code: to execute python code. Use this tool for complex calcualations or data analysis.
-# 3. search_web: to search the web for the given query. Use this tool if you want to lookup web for some information.
+graph = create_graph(Configuration())

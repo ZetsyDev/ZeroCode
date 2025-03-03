@@ -1,5 +1,5 @@
-"""Define the configurable parameters for the agent."""
 
+"""Define the configurable parameters for the agent."""
 from dataclasses import dataclass, fields
 from typing import Optional
 
@@ -7,13 +7,13 @@ from langchain_core.runnables import RunnableConfig
 
 
 @dataclass(kw_only=True)
-class IndexConfiguration:
+class Configuration:
     """The configuration for the agent."""
-    retriever_provider: str = "pinecone"
-    embedding_model: str = "openai/text-embedding-3-small"
-    response_model: str = "anthropic/claude-3-5-sonnet-20240620"
-    query_model: str = "anthropic/claude-3-haiku-20240307"
-    user_id: str = "manoj"
+
+    thread_id: str = "thread-1"
+    model: str = "anthropic/claude-3-7-sonnet-latest"
+    prompt: str = "You are a helpful AI assistant, please respond to the users query to the best of your ability!"
+    workspace: str = "workspace"
 
     @classmethod
     def from_runnable_config(
