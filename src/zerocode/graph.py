@@ -17,9 +17,6 @@ def create_graph(config: Configuration):
     # Initialize LLM with configured model
     llm = load_chat_model(config.model)
     prompt = config.prompt
-    graph = create_react_agent(name="React Agent", model=llm, tools=tools, prompt=prompt)
+    graph = create_react_agent(name="react-agent", model=llm, tools=tools, prompt=prompt)
     
     return graph
-
-
-graph = create_graph(Configuration())
